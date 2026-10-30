@@ -3,5 +3,6 @@ __pycache__/
 *.blend1
 dist/staging/
 *.log
-test-results/
-blender-test/
+/test-results/
+/blender-test/
+/log/
