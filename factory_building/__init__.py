@@ -1,6 +1,6 @@
 bl_info = {
     "name": "工厂建筑基础", "author": "Factory with DOTS",
-    "version": (0, 1, 2), "blender": (4, 1, 0),
+    "version": (0, 1, 7), "blender": (4, 1, 0),
     "location": "3D View > Sidebar > 工厂建筑基础",
     "description": "建筑底面占格与物流端口编辑", "category": "3D View",
 }
@@ -13,7 +13,7 @@ import gpu
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 from bpy_extras import view3d_utils
 from gpu_extras.batch import batch_for_shader
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from bpy.app.handlers import persistent
 
 from . import core
@@ -21,6 +21,8 @@ from . import core
 _handles = []
 _session = None
 _cache = None
+_normalizing_ports = False
+_keymaps = []
 
 
 def redraw():
@@ -43,22 +45,51 @@ def resized(self, context):
     redraw()
 
 
-def allocate_index(s, kind, exclude=None):
-    field = 'next_input_index' if kind == 'Input' else 'next_output_index'
-    value = max(getattr(s, field), max((p.index + 1 for p in s.ports
-                if p.kind == kind and p != exclude), default=0))
-    setattr(s, field, value + 1)
-    return value
+def normalize_ports(s):
+    """Indices describe current ports, not a lifetime allocation counter."""
+    global _normalizing_ports
+    if _normalizing_ports:
+        return
+    _normalizing_ports = True
+    try:
+        counts = {'Input': 0, 'Output': 0}
+        for p in s.ports:
+            p.index = counts[p.kind]
+            counts[p.kind] += 1
+        outputs = sorted((p for p in s.ports if p.kind == 'Output'), key=lambda p: p.output_slot)
+        for slot, p in enumerate(outputs, 1):
+            p.output_slot = slot
+            p.number = slot  # Legacy compatibility; only output_slot is shown.
+            p['_last_output_slot'] = slot
+        for key in ('next_input_index', 'next_output_index', 'next_output_slot'):
+            if key in s:
+                del s[key]
+    finally:
+        _normalizing_ports = False
 
 
-def assign_output_slot(s, p):
-    p.output_slot = max(s.next_output_slot, max((q.output_slot + 1 for q in s.ports
-                        if q.kind == 'Output' and q != p), default=1))
-    s.next_output_slot = p.output_slot + 1
-    p.number = p.output_slot  # Legacy data compatibility; no separate UI number.
+def slot_changed(self, context):
+    global _normalizing_ports
+    if _normalizing_ports or self.kind != 'Output':
+        return
+    s = self.id_data.factory_building
+    outputs = [p for p in s.ports if p.kind == 'Output']
+    target = max(1, min(self.output_slot, len(outputs)))
+    previous = self.get('_last_output_slot', target)
+    _normalizing_ports = True
+    try:
+        for p in outputs:
+            if p != self and p.output_slot == target:
+                p.output_slot = previous
+        self.output_slot = target
+    finally:
+        _normalizing_ports = False
+    normalize_ports(s)
+    redraw()
 
 
 def kind_changed(self, context):
+    global _normalizing_ports
     # Remember the last kind so direct property edits also reverse flow, while
     # preserving the same physical boundary and outside connection cell.
     previous = self.get('_last_kind', 'Input')
@@ -66,9 +97,13 @@ def kind_changed(self, context):
     if previous != self.kind:
         self.direction = {'E': 'W', 'W': 'E', 'N': 'S', 'S': 'N'}[self.direction]
         s = self.id_data.factory_building
-        self.index = allocate_index(s, self.kind, self)
         if self.kind == 'Output':
-            assign_output_slot(s, self)
+            _normalizing_ports = True
+            try:
+                self.output_slot = sum(p.kind == 'Output' for p in s.ports)
+            finally:
+                _normalizing_ports = False
+        normalize_ports(s)
     redraw()
 
 
@@ -79,26 +114,26 @@ class FactoryPort(bpy.types.PropertyGroup):
     cell_z: IntProperty(name="连接格 Z（Blender Y）", update=changed)
     direction: EnumProperty(name="物流方向", items=[('E', '+X', ''), ('W', '-X', ''), ('N', '+Z（Blender +Y）', ''), ('S', '-Z（Blender -Y）', '')], update=changed)
     number: IntProperty(name="旧版出口编号", default=1, min=1, options={'HIDDEN'})
-    output_slot: IntProperty(name="产物槽", default=1, min=1, update=changed)
+    output_slot: IntProperty(name="产物槽", default=1, min=1, update=slot_changed)
 
 
 class FactorySettings(bpy.types.PropertyGroup):
     visible: BoolProperty(name="显示建筑参考", default=True, update=changed)
+    render_layer: EnumProperty(name="渲染层级", items=[
+        ('NORMAL', '正常', '建筑参考会被其他物体遮挡'),
+        ('FRONT', '总是在前', '建筑参考不被其他物体遮挡')], default='NORMAL', update=changed)
     width: IntProperty(name="宽（X 格数）", default=4, min=1, max=128, update=resized)
     length: IntProperty(name="长（Y 格数）", default=3, min=1, max=128, update=resized)
     stored_width: IntProperty(default=4)
     stored_length: IntProperty(default=3)
     bitmap: StringProperty(default='111111111111', update=changed)
-    cell_size: FloatProperty(name="每格尺寸", default=1, min=.01, max=1000, update=changed)
+    cell_size: FloatProperty(name="每格尺寸", min=1, max=1, get=lambda self: 1.0, options={'HIDDEN'})
     opacity: FloatProperty(name="栅格透明度", default=.25, min=.05, max=.8, update=changed)
     port_height: FloatProperty(name="箭头高度（格）", default=.65, min=.05, max=10, update=changed)
     processor: BoolProperty(name="加工建筑（绑定产物槽）", default=True, update=changed)
     placement_kind: EnumProperty(name="添加类型", items=[('Input', '输入', ''), ('Output', '输出', '')])
     ports: CollectionProperty(type=FactoryPort)
     active_port: IntProperty(default=0, min=0, update=changed)
-    next_input_index: IntProperty(default=0, min=0, options={'HIDDEN'})
-    next_output_index: IntProperty(default=0, min=0, options={'HIDDEN'})
-    next_output_slot: IntProperty(default=1, min=1, options={'HIDDEN'})
 
 
 def errors(s):
@@ -192,10 +227,13 @@ def draw_world():
     shader, batches = grid_batches(s, effective_bitmap(s))
     blend = gpu.state.blend_get()
     depth = gpu.state.depth_test_get()
+    depth_mask = gpu.state.depth_mask_get()
     try:
         gpu.state.blend_set('ALPHA')
-        # Reference stays readable through the model and never writes scene depth.
-        gpu.state.depth_test_set('NONE')
+        gpu.state.depth_test_set('LESS_EQUAL' if s.render_layer == 'NORMAL' else 'NONE')
+        # Transparent references test against scene geometry, but never become
+        # occluders for the scene or for one another.
+        gpu.state.depth_mask_set(False)
         for batch, color in zip(batches, [(1, .36, .36, s.opacity), (.4, 1, .55, s.opacity), (.65, .8, .8, .6)]):
             if batch:
                 shader.bind()
@@ -227,6 +265,7 @@ def draw_world():
     finally:
         gpu.state.blend_set(blend)
         gpu.state.depth_test_set(depth)
+        gpu.state.depth_mask_set(depth_mask)
 
 
 def draw_labels():
@@ -236,16 +275,35 @@ def draw_labels():
     s = context.scene.factory_building
     if not s.visible or not context.space_data.overlay.show_overlays:
         return
-    blf.size(0, 13)
-    for i, p in enumerate(s.ports):
-        edge = core.port_edge(p.cell_x, p.cell_z, core.DIRECTIONS[p.direction], p.kind)
-        c = Vector(core.edge_center(edge, s.width, s.length, s.cell_size))
-        c.z = (s.port_height + .15) * s.cell_size
-        pos = view3d_utils.location_3d_to_region_2d(context.region, context.region_data, c)
-        if pos:
-            blf.position(0, pos.x + 6, pos.y, 0)
-            blf.color(0, 1, 1, 1, 1)
-            blf.draw(0, port_label(p))
+    depth = gpu.state.depth_test_get()
+    depth_mask = gpu.state.depth_mask_get()
+    try:
+        gpu.state.depth_test_set('LESS_EQUAL' if s.render_layer == 'NORMAL' else 'NONE')
+        gpu.state.depth_mask_set(False)
+        # Pixel-sized glyphs retain each label's world-space depth, so text
+        # obeys the same per-pixel occlusion as the grid and port arrows.
+        width, height = context.region.width, context.region.height
+        projection = Matrix(((2 / width, 0, 0, -1), (0, 2 / height, 0, -1),
+                             (0, 0, 1, 0), (0, 0, 0, 1)))
+        with gpu.matrix.push_pop(), gpu.matrix.push_pop_projection():
+            gpu.matrix.load_matrix(Matrix.Identity(4))
+            gpu.matrix.load_projection_matrix(projection)
+            blf.size(0, 13)
+            for p in s.ports:
+                edge = core.port_edge(p.cell_x, p.cell_z, core.DIRECTIONS[p.direction], p.kind)
+                c = Vector(core.edge_center(edge, s.width, s.length, s.cell_size))
+                c.z = (s.port_height + .15) * s.cell_size
+                clip = context.region_data.perspective_matrix @ c.to_4d()
+                if clip.w <= 0 or not -clip.w <= clip.z <= clip.w:
+                    continue
+                pos = view3d_utils.location_3d_to_region_2d(context.region, context.region_data, c)
+                if pos:
+                    blf.position(0, pos.x + 6, pos.y, clip.z / clip.w)
+                    blf.color(0, 1, 1, 1, 1)
+                    blf.draw(0, port_label(p))
+    finally:
+        gpu.state.depth_test_set(depth)
+        gpu.state.depth_mask_set(depth_mask)
 
 
 class FACTORY_OT_cells(bpy.types.Operator):
@@ -298,11 +356,11 @@ class FACTORY_OT_port_add(bpy.types.Operator):
             if core.port_edge(p.cell_x, p.cell_z, core.DIRECTIONS[p.direction], p.kind) == boundary:
                 s.active_port = i
                 return {'FINISHED'}
-        index = allocate_index(s, 'Input')
         p = s.ports.add()
-        p.kind, p.index = 'Input', index
+        p.kind = 'Input'
         p['_last_kind'] = 'Input'
         p.cell_x, p.cell_z, p.direction = x, y, direction_key
+        normalize_ports(s)
         s.active_port = len(s.ports) - 1
         redraw()
         return {'FINISHED'}
@@ -338,13 +396,63 @@ class FACTORY_OT_port_remove(bpy.types.Operator):
     bl_label = '删除选中端口'
     bl_options = {'REGISTER', 'UNDO'}
 
+    @classmethod
+    def poll(cls, context):
+        return FACTORY_OT_port_reverse.poll(context)
+
     def execute(self, context):
         s = context.scene.factory_building
         if s.ports:
             s.ports.remove(min(s.active_port, len(s.ports) - 1))
             s.active_port = max(0, min(s.active_port, len(s.ports) - 1))
+            normalize_ports(s)
         redraw()
         return {'FINISHED'}
+
+
+def is_port_list(context):
+    ui_list = getattr(context, 'ui_list', None)
+    return ui_list is not None and ui_list.bl_idname == 'FACTORY_UL_ports'
+
+
+class FACTORY_OT_port_hotkey_remove(bpy.types.Operator):
+    bl_idname = 'factory.remove_port_hotkey'
+    bl_label = '删除选中端口'
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.area is not None and context.area.type == 'VIEW_3D'
+                and context.mode == 'OBJECT' and FACTORY_OT_port_remove.poll(context))
+
+    def execute(self, context):
+        return bpy.ops.factory.remove_port()
+
+
+class FACTORY_OT_port_list_remove(bpy.types.Operator):
+    bl_idname = 'factory.remove_list_port'
+    bl_label = '删除选中端口'
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return is_port_list(context) and FACTORY_OT_port_remove.poll(context)
+
+    def execute(self, context):
+        return bpy.ops.factory.remove_port()
+
+
+class FACTORY_MT_port_context(bpy.types.Menu):
+    bl_label = '端口操作'
+
+    def draw(self, context):
+        self.layout.operator('factory.remove_port', text='删除', icon='TRASH')
+        self.layout.operator('factory.reverse_port', text='反转', icon='ARROW_LEFTRIGHT')
+
+
+def port_list_context_menu(self, context):
+    if is_port_list(context):
+        self.layout.menu_contents('FACTORY_MT_port_context')
 
 
 class FACTORY_OT_edit(bpy.types.Operator):
@@ -369,16 +477,18 @@ class FACTORY_OT_edit(bpy.types.Operator):
         self.pending = set()
         self.paint = '1'
         self.button = None
-        self.navigating = False
         self.last_cell = None
         self.signature = (self.scene.factory_building.width, self.scene.factory_building.length)
         self.scene.factory_building.visible = True
         _session = self
-        text = '占格：左键涂占用，右键涂空格；Enter / Esc 退出；中键导航' if self.mode == 'CELLS' else '端口：点击边界添加输入，点击三角形选中；R 反转；Enter / Esc 退出'
-        self.area.header_text_set(text)
+        self.update_header()
         context.window_manager.modal_handler_add(self)
         redraw()
         return {'RUNNING_MODAL'}
+
+    def update_header(self):
+        text = '占格：左键占用，右键清空；Alt+F 切换端口；Enter / Esc 退出' if self.mode == 'CELLS' else '端口：左键添加/选择，右键菜单；R 反转；Delete / Alt+D 删除；Esc 退出'
+        self.area.header_text_set(text)
 
     def finish(self):
         global _session
@@ -400,6 +510,26 @@ class FACTORY_OT_edit(bpy.types.Operator):
                 or context.mode != 'OBJECT' or (s.width, s.length) != self.signature):
             self.finish()
             return {'CANCELLED'}
+        in_viewport = (0 <= event.mouse_x - self.region.x < self.region.width
+                       and 0 <= event.mouse_y - self.region.y < self.region.height)
+        delete_key = (event.type == 'D' and event.alt and not event.ctrl and not getattr(event, 'shift', False))
+        delete_key |= (event.type == 'DEL' and self.mode == 'PORTS' and in_viewport)
+        if delete_key:
+            if event.value == 'PRESS' and not getattr(event, 'is_repeat', False) and FACTORY_OT_port_remove.poll(context):
+                bpy.ops.factory.remove_port()
+            return {'RUNNING_MODAL'}
+        if event.alt and not event.ctrl and not getattr(event, 'shift', False) and event.type in {'S', 'F'}:
+            if event.value == 'PRESS' and not getattr(event, 'is_repeat', False):
+                if self.pending:
+                    bpy.ops.factory.apply_cells(indices=json.dumps(sorted(self.pending)), value=self.paint)
+                self.pending.clear()
+                self.button = None
+                self.last_cell = None
+                self.hover = None
+                self.mode = 'CELLS' if event.type == 'S' else 'PORTS'
+                self.update_header()
+                redraw()
+            return {'RUNNING_MODAL'}
         if event.type in {'ESC', 'RET', 'NUMPAD_ENTER'} and event.value == 'PRESS':
             self.finish()
             return {'FINISHED'}
@@ -409,9 +539,18 @@ class FACTORY_OT_edit(bpy.types.Operator):
             self.last_cell = None
             return {'PASS_THROUGH'}
         if event.type == 'MIDDLEMOUSE':
-            self.navigating = event.value != 'RELEASE'
-            return {'PASS_THROUGH'}
-        if self.navigating:
+            # Native orbit/pan owns its modal events, including MMB RELEASE.
+            # Do not latch a flag waiting for a release this operator may never
+            # receive. Native navigation consumes its drag events; after it
+            # finishes the next editing event can be handled immediately.
+            if event.value == 'PRESS':
+                if self.pending:
+                    bpy.ops.factory.apply_cells(indices=json.dumps(sorted(self.pending)), value=self.paint)
+                self.pending.clear()
+                self.button = None
+                self.last_cell = None
+                self.hover = None
+                redraw()
             return {'PASS_THROUGH'}
         if self.mode == 'PORTS' and event.type == 'R' and not event.alt and not event.ctrl:
             if event.value == 'PRESS' and not getattr(event, 'is_repeat', False) and FACTORY_OT_port_reverse.poll(context):
@@ -466,6 +605,11 @@ class FACTORY_OT_edit(bpy.types.Operator):
                 elif self.hover is not None:
                     x, y, dx, dy = self.hover
                     bpy.ops.factory.add_port(edge=y * s.width + x, dx=dx, dy=dy)
+            elif event.type == 'RIGHTMOUSE' and event.value == 'PRESS':
+                if port is not None:
+                    s.active_port = port
+                if FACTORY_OT_port_remove.poll(context):
+                    bpy.ops.wm.call_menu(name='FACTORY_MT_port_context')
         redraw()
         return {'RUNNING_MODAL'}
 
@@ -525,11 +669,11 @@ class FACTORY_PT_footprint(bpy.types.Panel):
         s = context.scene.factory_building
         col = self.layout.column()
         col.prop(s, 'visible')
+        col.prop(s, 'render_layer')
         col.prop(s, 'width')
         col.prop(s, 'length')
-        col.prop(s, 'cell_size')
         col.prop(s, 'opacity')
-        col.operator('factory.edit', text='在视口中编辑占格', icon='BRUSH_DATA').mode = 'CELLS'
+        col.operator('factory.edit', text='在视口中编辑占格（Alt+S）', icon='BRUSH_DATA').mode = 'CELLS'
         row = col.row(align=True)
         row.operator('factory.fill_cells', text='全部占用').value = True
         row.operator('factory.fill_cells', text='全部清空').value = False
@@ -550,7 +694,7 @@ class FACTORY_PT_ports(bpy.types.Panel):
         s = context.scene.factory_building
         col = self.layout.column()
         col.prop(s, 'port_height')
-        col.operator('factory.edit', text='在视口边界添加 / 选择端口', icon='EMPTY_ARROWS').mode = 'PORTS'
+        col.operator('factory.edit', text='添加 / 选择端口（Alt+F）', icon='EMPTY_ARROWS').mode = 'PORTS'
         col.template_list('FACTORY_UL_ports', '', s, 'ports', s, 'active_port', rows=3)
         if s.ports:
             p = s.ports[min(s.active_port, len(s.ports) - 1)]
@@ -571,7 +715,8 @@ class FACTORY_PT_ports(bpy.types.Panel):
 
 
 CLASSES = (FactoryPort, FactorySettings, FACTORY_OT_cells, FACTORY_OT_fill,
-           FACTORY_OT_port_add, FACTORY_OT_port_reverse, FACTORY_OT_port_remove, FACTORY_OT_edit,
+           FACTORY_OT_port_add, FACTORY_OT_port_reverse, FACTORY_OT_port_remove,
+           FACTORY_OT_port_list_remove, FACTORY_OT_port_hotkey_remove, FACTORY_MT_port_context, FACTORY_OT_edit,
            FACTORY_UL_ports, FACTORY_PT_footprint, FACTORY_PT_ports)
 
 
@@ -593,11 +738,11 @@ def initialize_ports():
     """Migrate old files/enabled sessions without touching data in register()."""
     for scene in bpy.data.scenes:
         s = scene.factory_building
+        if 'cell_size' in s:
+            del s['cell_size']
         for p in s.ports:
             p['_last_kind'] = p.kind
-        s.next_input_index = max(s.next_input_index, max((p.index + 1 for p in s.ports if p.kind == 'Input'), default=0))
-        s.next_output_index = max(s.next_output_index, max((p.index + 1 for p in s.ports if p.kind == 'Output'), default=0))
-        s.next_output_slot = max(s.next_output_slot, max((p.output_slot + 1 for p in s.ports if p.kind == 'Output'), default=1))
+        normalize_ports(s)
     redraw()
 
 
@@ -610,12 +755,35 @@ def register():
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(draw_world, (), 'WINDOW', 'POST_VIEW'))
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(draw_labels, (), 'WINDOW', 'POST_PIXEL'))
     bpy.app.timers.register(initialize_ports)
+    bpy.types.UI_MT_list_item_context_menu.append(port_list_context_menu)
+    keyconfig = bpy.context.window_manager.keyconfigs.addon
+    if keyconfig is not None:
+        # Same keymap as Blender's default Alt+S clear-scale binding. Add-on
+        # bindings take precedence only in Object Mode; edit-mesh keys remain.
+        keymap = keyconfig.keymaps.new(name='Object Mode', space_type='EMPTY')
+        for key, mode in (('S', 'CELLS'), ('F', 'PORTS')):
+            item = keymap.keymap_items.new('factory.edit', type=key, value='PRESS', alt=True, head=True)
+            item.properties.mode = mode
+            _keymaps.append((keymap, item))
+        item = keymap.keymap_items.new('factory.remove_port_hotkey', type='D', value='PRESS', alt=True, head=True)
+        _keymaps.append((keymap, item))
+        # Sidebar widgets use the UI map rather than the viewport's mode map.
+        # The operator poll restricts this binding to a 3D View with a port.
+        keymap = keyconfig.keymaps.new(name='User Interface', space_type='EMPTY')
+        item = keymap.keymap_items.new('factory.remove_port_hotkey', type='D', value='PRESS', alt=True, head=True)
+        _keymaps.append((keymap, item))
+        item = keymap.keymap_items.new('factory.remove_list_port', type='DEL', value='PRESS', head=True)
+        _keymaps.append((keymap, item))
 
 
 def unregister():
     global _cache
     if _session:
         _session.finish()
+    bpy.types.UI_MT_list_item_context_menu.remove(port_list_context_menu)
+    for keymap, item in _keymaps:
+        keymap.keymap_items.remove(item)
+    _keymaps.clear()
     if bpy.app.timers.is_registered(initialize_ports):
         bpy.app.timers.unregister(initialize_ports)
     for handle in _handles:

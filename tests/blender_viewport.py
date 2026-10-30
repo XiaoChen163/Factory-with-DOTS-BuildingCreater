@@ -175,7 +175,7 @@ def save_capture():
         buffer = gpu.types.GPUOffScreen(1000, 800)
         with bpy.context.temp_override(area=area, region=region):
             with buffer.bind():
-                gpu.state.active_framebuffer_get().clear(color=(.055, .055, .055, 1))
+                gpu.state.active_framebuffer_get().clear(color=(.055, .055, .055, 1), depth=1)
                 projection = Matrix(((.3, 0, 0, 0), (0, .375, 0, 0), (0, 0, -.1, 0), (0, 0, 0, 1)))
                 with gpu.matrix.push_pop():
                     gpu.matrix.load_matrix(Matrix.Identity(4))
