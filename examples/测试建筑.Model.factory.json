@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "generator": {
+    "name": "factory_building",
+    "version": "0.3.1"
+  },
+  "source": {
+    "blend_file": "测试建筑.Model.blend",
+    "scene": "Scene",
+    "frame": 1,
+    "subframe": 0.0
+  },
+  "coordinates": {
+    "space": "unity_local",
+    "origin": "footprint_bounds_bottom_center",
+    "up_axis": "Y",
+    "forward_axis": "+Z",
+    "cell_size": 1.0,
+    "unit": "blender_unit",
+    "rotation_format": "quaternion_xyzw",
+    "blender_to_unity": [
+      [
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        1,
+        0
+      ]
+    ]
+  },
+  "building": {
+    "key": "测试建筑.Model",
+    "model_file": "测试建筑.Model.fbx",
+    "width": 4,
+    "length": 3,
+    "is_rectangle": false,
+    "bitmap": "1111/1111/1100"
+  },
+  "ports": [
+    {
+      "type": "Input",
+      "index": 0,
+      "cell_x": 2,
+      "cell_z": 2,
+      "direction_x": 0,
+      "direction_z": -1
+    },
+    {
+      "type": "Output",
+      "index": 0,
+      "cell_x": 4,
+      "cell_z": 1,
+      "direction_x": 1,
+      "direction_z": 0,
+      "output_slot": 1,
+      "number": 1
+    }
+  ],
+  "colliders": [
+    {
+      "name": "UnityCollider_Box",
+      "type": "Box",
+      "position": {
+        "x": 1.0,
+        "y": 3.0,
+        "z": 2.0
+      },
+      "rotation": {
+        "x": -0.29689157,
+        "y": -0.529169858,
+        "z": 0.215672433,
+        "w": 0.765062273
+      },
+      "size": {
+        "x": 2.0,
+        "y": 4.0,
+        "z": 3.0
+      }
+    },
+    {
+      "name": "UnityCollider_Capsule",
+      "type": "Capsule",
+      "position": {
+        "x": 1.0,
+        "y": 3.0,
+        "z": 2.0
+      },
+      "rotation": {
+        "x": -0.29689157,
+        "y": -0.529169858,
+        "z": 0.215672433,
+        "w": 0.765062273
+      },
+      "radius": 0.5,
+      "height": 4.0,
+      "axis": "Y"
+    },
+    {
+      "name": "UnityCollider_Cylinder",
+      "type": "Cylinder",
+      "position": {
+        "x": 1.0,
+        "y": 3.0,
+        "z": 2.0
+      },
+      "rotation": {
+        "x": -0.29689157,
+        "y": -0.529169858,
+        "z": 0.215672433,
+        "w": 0.765062273
+      },
+      "radius": 0.5,
+      "height": 3.0,
+      "axis": "Y"
+    },
+    {
+      "name": "UnityCollider_Sphere",
+      "type": "Sphere",
+      "position": {
+        "x": 1.0,
+        "y": 3.0,
+        "z": 2.0
+      },
+      "rotation": {
+        "x": -0.29689157,
+        "y": -0.529169858,
+        "z": 0.215672433,
+        "w": 0.765062273
+      },
+      "radius": 0.5
+    }
+  ]
+}

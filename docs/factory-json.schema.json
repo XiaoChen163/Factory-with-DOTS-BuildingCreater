@@ -1,0 +1,515 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Factory building metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator",
+    "source",
+    "coordinates",
+    "building"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "factory_building"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blend_file",
+        "scene",
+        "frame",
+        "subframe"
+      ],
+      "properties": {
+        "blend_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scene": {
+          "type": "string"
+        },
+        "frame": {
+          "type": "integer"
+        },
+        "subframe": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "coordinates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "space",
+        "origin",
+        "up_axis",
+        "forward_axis",
+        "cell_size",
+        "unit",
+        "rotation_format",
+        "blender_to_unity"
+      ],
+      "properties": {
+        "space": {
+          "const": "unity_local"
+        },
+        "origin": {
+          "const": "footprint_bounds_bottom_center"
+        },
+        "up_axis": {
+          "const": "Y"
+        },
+        "forward_axis": {
+          "const": "+Z"
+        },
+        "cell_size": {
+          "const": 1
+        },
+        "unit": {
+          "const": "blender_unit"
+        },
+        "rotation_format": {
+          "const": "quaternion_xyzw"
+        },
+        "blender_to_unity": {
+          "const": [
+            [
+              1,
+              0,
+              0
+            ],
+            [
+              0,
+              0,
+              1
+            ],
+            [
+              0,
+              1,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    "building": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "model_file"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "is_rectangle": {
+          "type": "boolean"
+        },
+        "bitmap": {
+          "type": "string",
+          "pattern": "^$|^[01]+(?:/[01]+)*$"
+        }
+      },
+      "dependentRequired": {
+        "width": [
+          "length",
+          "is_rectangle",
+          "bitmap"
+        ],
+        "length": [
+          "width",
+          "is_rectangle",
+          "bitmap"
+        ],
+        "is_rectangle": [
+          "width",
+          "length",
+          "bitmap"
+        ],
+        "bitmap": [
+          "width",
+          "length",
+          "is_rectangle"
+        ]
+      }
+    },
+    "ports": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "$ref": "#/$defs/port"
+      }
+    },
+    "colliders": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/collider"
+      }
+    }
+  },
+  "$defs": {
+    "vector3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      }
+    },
+    "size3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "y": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "z": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "quaternion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "z",
+        "w"
+      ],
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number"
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "index",
+        "cell_x",
+        "cell_z",
+        "direction_x",
+        "direction_z"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "Input",
+            "Output"
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "cell_x": {
+          "type": "integer"
+        },
+        "cell_z": {
+          "type": "integer"
+        },
+        "direction_x": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "direction_z": {
+          "type": "integer",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "output_slot": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "Output"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "output_slot",
+              "number"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "output_slot"
+                  ]
+                },
+                {
+                  "required": [
+                    "number"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "direction_x": {
+                  "enum": [
+                    -1,
+                    1
+                  ]
+                },
+                "direction_z": {
+                  "const": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "direction_x": {
+                  "const": 0
+                },
+                "direction_z": {
+                  "enum": [
+                    -1,
+                    1
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "collider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "position",
+        "rotation"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "Box",
+            "Sphere",
+            "Cylinder",
+            "Capsule"
+          ]
+        },
+        "position": {
+          "$ref": "#/$defs/vector3"
+        },
+        "rotation": {
+          "$ref": "#/$defs/quaternion"
+        },
+        "size": {
+          "$ref": "#/$defs/size3"
+        },
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "axis": {
+          "const": "Y"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "Box"
+            }
+          },
+          "required": [
+            "size"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "radius"
+                ]
+              },
+              {
+                "required": [
+                  "height"
+                ]
+              },
+              {
+                "required": [
+                  "axis"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "Sphere"
+            }
+          },
+          "required": [
+            "radius"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "size"
+                ]
+              },
+              {
+                "required": [
+                  "height"
+                ]
+              },
+              {
+                "required": [
+                  "axis"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "Cylinder",
+                "Capsule"
+              ]
+            }
+          },
+          "required": [
+            "radius",
+            "height",
+            "axis"
+          ],
+          "not": {
+            "required": [
+              "size"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "anyOf": [
+    {
+      "properties": {
+        "building": {
+          "required": [
+            "width"
+          ]
+        }
+      }
+    },
+    {
+      "required": [
+        "ports"
+      ]
+    },
+    {
+      "required": [
+        "colliders"
+      ]
+    }
+  ]
+}

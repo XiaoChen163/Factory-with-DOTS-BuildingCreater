@@ -71,7 +71,12 @@ s.opacity = .4
 s.placement_kind = 'Input'
 bpy.ops.factory.add_port(edge=0, dx=-1, dy=0)
 assert len(s.ports) == 1
+for kind in ('BOX', 'SPHERE', 'CYLINDER', 'CAPSULE'):
+    bpy.ops.factory.add_collider(kind=kind)
+bpy.context.object.factory_collider.radius = .75
+bpy.context.object.factory_collider.height = 3
 bpy.ops.wm.save_as_mainfile(filepath={blend!r})
+assert bpy.ops.factory.export_json() == {{'FINISHED'}}
 bpy.ops.wm.save_userpref()
 print('LIFECYCLE_INSTALL_ENABLE_SAVE_OK')
 '''
@@ -82,19 +87,29 @@ assert Path(bpy.utils.user_resource('CONFIG')).resolve().is_relative_to(Path({di
 assert addon_utils.check('factory_building') == (True, True), 'Addon did not auto-enable at startup'
 bpy.ops.wm.open_mainfile(filepath={blend!r})
 import factory_building as addon
+import json
+exported = json.loads(Path({blend!r}).with_suffix('.factory.json').read_text(encoding='utf8'))
+assert exported['schema_version'] == 1 and len(exported['colliders']) == 4
 s = bpy.context.scene.factory_building
 assert (s.width, s.length, s.bitmap) == (5, 4, '11111001111111111111')
 assert s.visible and abs(s.opacity - .4) < .0001
 assert len(s.ports) == 1 and s.ports[0].cell_x == -1
 assert len(addon._handles) == 2
 assert addon.before_load in bpy.app.handlers.load_pre
+assert len(addon.colliders._handles) == 1
+proxies = [o for o in bpy.context.scene.objects if addon.colliders.is_proxy(o)]
+assert len(proxies) == 4
+capsule = next(o for o in proxies if o.factory_collider.kind == 'CAPSULE')
+assert capsule.factory_collider.radius == .75 and capsule.factory_collider.height == 3
 for i in range(2):
     addon_utils.disable('factory_building', default_set=True)
     assert not addon._handles
+    assert not addon.colliders._handles
     failures = []
     addon_utils.enable('factory_building', default_set=True, handle_error=lambda *args: failures.append(True))
     assert not failures and addon_utils.check('factory_building') == (True, True)
     assert len(addon._handles) == 2
+    assert len(addon.colliders._handles) == 1
     assert bpy.context.scene.factory_building.bitmap == '11111001111111111111'
 print('LIFECYCLE_RESTART_REOPEN_TOGGLE_OK')
 '''

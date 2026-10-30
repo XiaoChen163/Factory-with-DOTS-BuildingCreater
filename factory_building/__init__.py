@@ -1,8 +1,8 @@
 bl_info = {
     "name": "工厂建筑基础", "author": "Factory with DOTS",
-    "version": (0, 1, 7), "blender": (4, 1, 0),
+    "version": (0, 3, 1), "blender": (4, 1, 0),
     "location": "3D View > Sidebar > 工厂建筑基础",
-    "description": "建筑底面占格与物流端口编辑", "category": "3D View",
+    "description": "建筑占格、物流端口与参数化碰撞代理编辑", "category": "3D View",
 }
 
 import json
@@ -16,7 +16,7 @@ from gpu_extras.batch import batch_for_shader
 from mathutils import Matrix, Vector
 from bpy.app.handlers import persistent
 
-from . import core
+from . import core, colliders, exporter
 
 _handles = []
 _session = None
@@ -750,6 +750,8 @@ def register():
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.Scene.factory_building = PointerProperty(type=FactorySettings)
+    colliders.register()
+    exporter.register()
     bpy.app.handlers.load_pre.append(before_load)
     bpy.app.handlers.load_post.append(after_load)
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(draw_world, (), 'WINDOW', 'POST_VIEW'))
@@ -780,6 +782,8 @@ def unregister():
     global _cache
     if _session:
         _session.finish()
+    exporter.unregister()
+    colliders.unregister()
     bpy.types.UI_MT_list_item_context_menu.remove(port_list_context_menu)
     for keymap, item in _keymaps:
         keymap.keymap_items.remove(item)
