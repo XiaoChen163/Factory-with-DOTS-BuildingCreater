@@ -1,6 +1,6 @@
 bl_info = {
     "name": "工厂建筑基础", "author": "Factory with DOTS",
-    "version": (0, 3, 1), "blender": (4, 1, 0),
+    "version": (0, 3, 2), "blender": (4, 1, 0),
     "location": "3D View > Sidebar > 工厂建筑基础",
     "description": "建筑占格、物流端口与参数化碰撞代理编辑", "category": "3D View",
 }

@@ -2,6 +2,7 @@
 from functools import lru_cache
 
 import bpy
+import bmesh
 import gpu
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, PointerProperty
 from bpy_extras import view3d_utils
@@ -235,6 +236,67 @@ class FACTORY_OT_collider_fit(bpy.types.Operator):
 FIT_NAMES = {'BOX': '立方体', 'SPHERE': '球', 'CYLINDER': '圆柱体', 'CAPSULE': '胶囊体'}
 
 
+class FACTORY_OT_collider_fit_selection(bpy.types.Operator):
+    bl_idname = 'factory.fit_selection_collider'
+    bl_label = '为选中几何生成外接碰撞代理'
+    bl_description = '使用选中顶点、边或面的编辑网格生成独立代理，保留编辑模式和当前选择；不包含修改器效果'
+    bl_options = {'REGISTER', 'UNDO'}
+    kind: EnumProperty(name='形状', items=KINDS, default='BOX')
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'EDIT_MESH' and context.edit_object is not None
+
+    def execute(self, context):
+        reference = context.edit_object
+        context.view_layer.update()
+        frame = rigid_matrix(reference)
+        points = []
+        # BMesh is the live edit cage. Selected edges/faces also select their
+        # vertices; hidden geometry must never contribute to this selection.
+        for obj in context.objects_in_mode:
+            if obj.type != 'MESH':
+                continue
+            mesh = bmesh.from_edit_mesh(obj.data)
+            transform = frame.inverted() @ obj.matrix_world
+            points.extend(transform @ v.co for v in mesh.verts if v.select and not v.hide)
+        if not points:
+            self.report({'WARNING'}, '请先选择顶点、边或面')
+            return {'CANCELLED'}
+        try:
+            center, parameters = collider_geometry.fit_points(self.kind, points)
+        except ValueError as error:
+            self.report({'WARNING'}, str(error))
+            return {'CANCELLED'}
+        # Empty creation needs a global undo snapshot; an edit-mesh-only undo
+        # step would preserve the mesh but leave the new proxy behind.
+        bpy.ops.object.mode_set(mode='OBJECT')
+        create_proxy(context, self.kind, location=frame @ Vector(center),
+                     rotation=frame.to_quaternion(), parameters=parameters,
+                     source_name=reference.name + '_Selection')
+        bpy.ops.ed.undo_push(message='添加选区碰撞代理')
+        bpy.ops.object.mode_set(mode='EDIT')
+        # Do not select the Empty or change modes: the modeler can immediately
+        # select the next part and build another independent proxy.
+        context.scene.factory_collider_display = True
+        redraw()
+        return {'FINISHED'}
+
+
+class FACTORY_MT_collider_fit_selection(bpy.types.Menu):
+    bl_label = '生成外接几何碰撞代理（选中部分）'
+
+    def draw(self, context):
+        for kind, _, _ in KINDS:
+            self.layout.operator('factory.fit_selection_collider', text=FIT_NAMES[kind]).kind = kind
+
+
+def edit_context_menu(self, context):
+    if context.mode == 'EDIT_MESH':
+        self.layout.separator()
+        self.layout.menu('FACTORY_MT_collider_fit_selection')
+
+
 def draw_fit_shapes(layout, scope):
     for kind, _, _ in KINDS:
         op = layout.operator('factory.fit_collider', text=FIT_NAMES[kind])
@@ -320,6 +382,10 @@ class FACTORY_PT_colliders(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         layout.prop(context.scene, 'factory_collider_display')
+        if context.mode == 'EDIT_MESH':
+            layout.menu('FACTORY_MT_collider_fit_selection', icon='CUBE')
+            layout.label(text='选中部分拟合；保持编辑模式')
+            return
         row = layout.row(align=True)
         for kind, name, _ in KINDS:
             row.operator('factory.add_collider', text=name).kind = kind
@@ -350,6 +416,7 @@ class FACTORY_PT_colliders(bpy.types.Panel):
 
 CLASSES = (FactoryCollider, FACTORY_OT_collider_add, FACTORY_OT_collider_select,
            FACTORY_OT_collider_fit, FACTORY_MT_collider_fit_each, FACTORY_MT_collider_fit_all,
+           FACTORY_OT_collider_fit_selection, FACTORY_MT_collider_fit_selection,
            FACTORY_MT_colliders, FACTORY_PT_colliders)
 
 
@@ -360,6 +427,7 @@ def register():
     bpy.types.Scene.factory_collider_display = BoolProperty(name='显示碰撞代理', default=True, update=display_changed)
     bpy.types.VIEW3D_MT_add.append(add_menu)
     bpy.types.VIEW3D_MT_object_context_menu.append(object_context_menu)
+    bpy.types.VIEW3D_MT_edit_mesh_context_menu.append(edit_context_menu)
     _handles.append(bpy.types.SpaceView3D.draw_handler_add(draw_proxies, (), 'WINDOW', 'POST_VIEW'))
     config = bpy.context.window_manager.keyconfigs.addon
     if config is not None:
@@ -377,6 +445,7 @@ def unregister():
     _handles.clear()
     bpy.types.VIEW3D_MT_add.remove(add_menu)
     bpy.types.VIEW3D_MT_object_context_menu.remove(object_context_menu)
+    bpy.types.VIEW3D_MT_edit_mesh_context_menu.remove(edit_context_menu)
     batches.cache_clear()
     collider_geometry.geometry.cache_clear()
     del bpy.types.Object.factory_collider
